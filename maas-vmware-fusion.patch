@@ -1,0 +1,207 @@
+--- provisioningserver/drivers/power/registry.py	2018-11-20 11:54:57.000000000 -0800
++++ provisioningserver/drivers/power/registry.py	2018-11-20 11:54:16.000000000 -0800
+@@ -26,6 +26,7 @@
+ from provisioningserver.drivers.power.ucsm import UCSMPowerDriver
+ from provisioningserver.drivers.power.virsh import VirshPowerDriver
+ from provisioningserver.drivers.power.vmware import VMwarePowerDriver
++from src.provisioningserver.drivers.power.vmware_fusion import VMwareFusionPowerDriver
+ from provisioningserver.drivers.power.wedge import WedgePowerDriver
+ from provisioningserver.utils.registry import Registry
+ 
+@@ -65,6 +66,7 @@
+     UCSMPowerDriver(),
+     VirshPowerDriver(),
+     VMwarePowerDriver(),
++    VMwareFusionPowerDriver(),
+     WedgePowerDriver(),
+ ]
+ for driver in power_drivers:
+--- provisioningserver/drivers/power/vmware_fusion.py	1969-12-31 16:00:00.000000000 -0800
++++ provisioningserver/drivers/power/vmware_fusion.py	2018-11-20 11:11:32.000000000 -0800
+@@ -0,0 +1,186 @@
++# Copyright 2015-2016 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++"""VMware Fusion Power Driver."""
++import base64
++import json
++
++from requests import Session
++
++from provisioningserver.logger import get_maas_logger
++
++__all__ = []
++
++from provisioningserver.drivers import (
++    make_ip_extractor,
++    make_setting_field,
++    SETTING_SCOPE,
++)
++from provisioningserver.drivers.power import PowerDriver
++
++maaslog = get_maas_logger("drivers.vmwaremac")
++
++
++class VMwareVMNotFound(RuntimeError):
++    """The specified virtual machine was not found."""
++
++
++class VMWareFusionRestAPI(object):
++    def __init__(self, host, username, password, port=None, protocol=None):
++        """
++        :param host: the VMWare Fusion host to connect to
++        :type host: string
++        :param username: A username authorized for the VMware Fusion Rest API
++        :type username: string
++        :param password: The password corresponding to the supplied username
++        :type password: string
++        :param port: The port on the VMware Fusion host to connect to
++        :type port: string
++        :param protocol: The protocol to use (default: 'https')
++        :type protocol: string
++        """
++        # defaults:
++        if not port:
++            port = '8697'
++        self.verify = True  # verify certificates
++        if not protocol:
++            protocol = 'https'
++        elif protocol == "https+unverified":
++            protocol = 'https'
++            self.verify = False
++        s = base64.b64encode('{}:{}'.format(username, password).encode()).decode()
++        self.auth_base64 = str(s).replace('\n', '')
++        # more internals:
++        self.base_url = '{}://{}:{}/api/'.format(protocol, host, port)
++        self.timeout_in_s = 5
++        self.session = Session()
++
++    def _send_request(self, path, data=None, json=None, mode=None):
++        """
++        Send a request to endpoint URL.
++
++        :param path: final service api end point url
++        :param data: optional body, makes the request a PUT instead of a GET
++        """
++        if not mode:
++            mode = 'put' if data is not None or json else 'get'
++
++        headers = {
++            'Content-Type': 'application/vnd.vmware.vmw.rest-v1+json',
++            'Accept': 'application/vnd.vmware.vmw.rest-v1+json'
++        }
++
++        url = self.base_url + path
++
++        headers["Authorization"] = 'Basic ' + self.auth_base64
++
++        maaslog.info('{} {} ({}/{})'.format(mode, url, data, json))
++        if mode == 'get':
++            r = self.session.get(url, headers=headers, timeout=self.timeout_in_s, verify=self.verify)
++        elif mode == 'put':
++            r = self.session.put(url, data=data, json=json, headers=headers, timeout=self.timeout_in_s,
++                                 verify=self.verify)
++        elif mode == 'post':
++            r = self.session.post(url, data=data, json=json, headers=headers, timeout=self.timeout_in_s,
++                                  verify=self.verify)
++        else:
++            raise RuntimeError('"{}" not implemented'.format(mode))
++        r.raise_for_status()
++        maaslog.info(' => {}'.format(r.content))
++        return r.content
++
++    def _find_vm_uuid(self, vm_name):
++        if not vm_name:
++            raise VMwareVMNotFound('no UUID or name specified')
++        raise VMwareVMNotFound('API does not expose VM name yet: cannot find ny name!!!')
++        vms = self.get_vms()
++        for vm in vms:
++            if vm['name'] == vm_name:
++                return vm['id']
++        raise VMwareVMNotFound('no VM found matching {}'.format(vm_name))
++
++    # VM Management:
++    # -------------
++
++    def get_vms(self):
++        return self._send_request(path='vms')
++
++    # Power management:
++    # ----------------
++
++    def get_power(self, uuid, vm_name=None):
++        if not uuid:
++            uuid = self._find_vm_uuid(vm_name)
++        return self._send_request(path='vms/{}/power'.format(uuid))
++
++    def set_power(self, uuid, state, vm_name=None):
++        if not uuid:
++            uuid = self._find_vm_uuid(vm_name)
++        return self._send_request(path='vms/{}/power'.format(uuid), data=state)
++
++
++def extract_vmware_parameters(context):
++    host = context.get('power_address')
++    username = context.get('power_user')
++    password = context.get('power_pass')
++    vm_name = context.get('power_vm_name')
++    uuid = context.get('power_uuid')
++    port = context.get('power_port')
++    protocol = context.get('power_protocol')
++    # Ensure the optional parameters are unambiguously present, or None.
++    if port is not None and port.strip() == "":
++        port = None
++    if protocol is not None and protocol.strip() == "":
++        protocol = None
++    maaslog.info(
++        'params: host={}, u={}, id={}, port={}, proto={}'.format(host, username, uuid, port, protocol))
++    return host, username, password, vm_name, uuid, port, protocol
++
++
++class VMwareFusionPowerDriver(PowerDriver):
++    def detect_missing_packages(self):
++        return []
++
++    name = 'vmwaremac'
++    description = "VMware Fusion (vmrest)"
++    settings = [
++        make_setting_field(
++            'power_vm_name', "VM Name (if UUID unknown)", required=False,
++            scope=SETTING_SCOPE.NODE),
++        make_setting_field(
++            'power_uuid', "VM UUID (if known)", required=False,
++            scope=SETTING_SCOPE.NODE),
++        make_setting_field('power_address', "VMware Fusion hostname", required=True),
++        make_setting_field('power_user', "VMware Fusion API username", required=True),
++        make_setting_field(
++            'power_pass', "VMware Fusion API password", field_type='password',
++            required=True),
++        make_setting_field(
++            'power_port', "VMware Fusion API port (optional, default to 8697)", required=False),
++        make_setting_field(
++            'power_protocol', "VMware API protocol (optional, default to https)",
++            required=False),
++    ]
++    ip_extractor = make_ip_extractor('power_address')
++
++    def power_on(self, system_id, context):
++        """Power on VMware node."""
++        host, username, password, vm_name, uuid, port, protocol = extract_vmware_parameters(context)
++        api = VMWareFusionRestAPI(host=host, username=username, password=password, port=port, protocol=protocol)
++        api.set_power(uuid, 'on')
++
++    def power_off(self, system_id, context):
++        """Power off VMware node."""
++        host, username, password, vm_name, uuid, port, protocol = extract_vmware_parameters(context)
++        api = VMWareFusionRestAPI(host=host, username=username, password=password, port=port, protocol=protocol)
++        api.set_power(uuid, 'off')
++
++    def power_query(self, system_id, context):
++        """Power query VMware node."""
++        power_map = {'poweredOn': 'on', 'poweredOff': 'off'}
++
++        host, username, password, vm_name, uuid, port, protocol = extract_vmware_parameters(context)
++        api = VMWareFusionRestAPI(host=host, username=username, password=password, port=port, protocol=protocol)
++        result = json.loads(api.get_power(uuid, vm_name))
++        result = power_map.get(result['power_state'], 'error')
++        return result
