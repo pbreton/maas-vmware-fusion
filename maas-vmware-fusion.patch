@@ -4,7 +4,7 @@
  from provisioningserver.drivers.power.ucsm import UCSMPowerDriver
  from provisioningserver.drivers.power.virsh import VirshPowerDriver
  from provisioningserver.drivers.power.vmware import VMwarePowerDriver
-+from src.provisioningserver.drivers.power.vmware_fusion import VMwareFusionPowerDriver
++from provisioningserver.drivers.power.vmware_fusion import VMwareFusionPowerDriver
  from provisioningserver.drivers.power.wedge import WedgePowerDriver
  from provisioningserver.utils.registry import Registry
  
