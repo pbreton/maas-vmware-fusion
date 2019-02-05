@@ -1,11 +1,6 @@
 --- provisioningserver/drivers/power/registry.py	2019-02-05 08:19:36.000000000 -0800
-+++ provisioningserver/drivers/power/registry.py	2018-11-20 11:54:16.000000000 -0800
-@@ -22,11 +22,11 @@
- from provisioningserver.drivers.power.msftocs import MicrosoftOCSPowerDriver
- from provisioningserver.drivers.power.nova import NovaPowerDriver
- from provisioningserver.drivers.power.recs import RECSPowerDriver
--from provisioningserver.drivers.power.redfish import RedfishPowerDriver
- from provisioningserver.drivers.power.seamicro import SeaMicroPowerDriver
++++ provisioningserver/drivers/power/registry.py	2019-02-05 08:51:43.000000000 -0800
+@@ -27,6 +27,7 @@
  from provisioningserver.drivers.power.ucsm import UCSMPowerDriver
  from provisioningserver.drivers.power.virsh import VirshPowerDriver
  from provisioningserver.drivers.power.vmware import VMwarePowerDriver
@@ -13,12 +8,7 @@
  from provisioningserver.drivers.power.wedge import WedgePowerDriver
  from provisioningserver.utils.registry import Registry
  
-@@ -62,11 +62,11 @@
-     MicrosoftOCSPowerDriver(),
-     NovaPowerDriver(),
-     RECSPowerDriver(),
--    RedfishPowerDriver(),
-     SeaMicroPowerDriver(),
+@@ -67,6 +68,7 @@
      UCSMPowerDriver(),
      VirshPowerDriver(),
      VMwarePowerDriver(),
